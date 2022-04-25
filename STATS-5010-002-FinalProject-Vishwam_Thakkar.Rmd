@@ -1,0 +1,727 @@
+---
+title: "Stats_project"
+author: "Vishwam Thakkar"
+date: "4/24/2022"
+output: pdf_document
+---
+
+```{r label = setup, echo = FALSE, message = FALSE,warning=FALSE}
+options(width = 110)
+knitr::opts_chunk$set(comment = NA, fig.height = 5, fig.width =10, fig.align = 'center')
+library(ggplot2)
+library(reshape2)
+library(lattice)
+library(tidyverse)
+library(matrixStats)
+library(ggpubr)
+set.seed(111)
+```
+
+# Introduction: 
+
+Airline delays. They are the bane of every travellers existence and anxiety. Airlines won’t tell you if your flight is likely to be delayed or not. Delayed flights can cause you to miss a connecting flight or an important business meeting. So why hasn’t anyone tried to explore if airline delays can be predicted with a reasonable degree of accuracy? In this analysis I first do some exploratory Data Analysis of flights data within US from 2005-2008 and then I try to develop a machine learning model that aims to predict if a flight arrival will be delayed by 15 minutes or more?
+
+
+# Data Explaination:
+
+Here's the descirption of all the data used in the analysis
+
+* Year - 2005-2008
+* Month - 1-12
+* DayofMonth - 1-31
+* DayOfWeek - 1(Monday)-7(Sunday)
+* DepTime - actual departure time (local, hhmm)
+* CRSDepTime - scheduled departure time (local, hhmm)
+* ArrTime - actual arrival time (local, hhmm)
+* CRSArrTime - scheduled arrival time (local, hhmm)
+* UniqueCarrier - unique carrier code
+* FlightNum - flight number
+* TailNum - plane tail number
+* ActualElapsedTime - in minutes
+* CRSElapsedTime - in minutes
+* AirTime - in minutes
+* ArrDelay - arrival delay, in minutes
+* DepDelay - departure delay, in minutes
+* Origin - origin IATA airport code
+* Dest - destination IATA airport code
+* Distance - in miles
+* TaxiIn - taxi in time, in minutes
+* TaxiOut - taxi out time in minutes
+* Cancelled - was the flight cancelled?
+* CancellationCode - reason for cancellation (A = carrier, B = weather, C = NAS, D = security)
+* Diverted - 1 = yes, 0 = no
+* CarrierDelay - in minutes
+* WeatherDelay - in minutes
+* NASDelay - in minutes
+* SecurityDelay - in minutes
+* LateAircraftDelay - in minutes
+
+# Data Origin and Collection
+
+The data can be found and downloaded by navigation to the following link:
+https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/HG7NV7
+
+The data downloads zip files with data from 1987-2008. For the sake of the project, I selected the data between 2005-2008. The downloaded data also contains other supportive CSVs with data of "carriers","planes" and "airports
+
+# Exploratory Data Analysis
+
+Since I have a massive dataset to work with, I will be trying to do the EDA based on only certain criterias. Those criterias are based on answering the following questions:
+
+1. Which flight carrier is most affected by delays and cancellations
+2. Which airports suffer the most delays and cancellations
+3. Which airline is the most delayed and cancelled at a certain airport
+4. Does distance affect flight delays and cancellations
+5. Top 20 most travelled routes and best time to travel on those routes through out a year.
+6. Considering 2008 had a major recession, did that affect the flight operations compared to other years.
+
+## Getting the data ready
+
+1. Loading the data  
+```{r,dataload}
+data_2008 = read.csv("H:\\Stats Project\\dataverse_files\\2008_data.csv")
+data_2005 = read.csv("H:\\Stats Project\\dataverse_files\\2005_data.csv")
+data_2006 = read.csv("H:\\Stats Project\\dataverse_files\\2006_data.csv")
+data_2007 = read.csv("H:\\Stats Project\\dataverse_files\\2007_data.csv")
+carriers_data = read.csv("H:\\Stats Project\\dataverse_files\\carriers.csv")
+airports_data = read.csv("H:\\Stats Project\\dataverse_files\\airports.csv")
+```
+
+2. Combining the data from all the years.
+```{r,datacombine}
+flight_data <- rbind(data_2005,data_2006,data_2007,data_2008)
+```
+
+3. Now, to make the EDA simpler, I will add the aiport names and carrier names to the main flights data where the aiports are identified by IATA codes and carriers are identified by codes as well. But before that, I need to make sure we have common column names to do a merge() operation.
+
+```{r,air_car_join}
+carriers_data <- carriers_data %>%
+  mutate(UniqueCarrier=Code)
+carriers_data <- subset(carriers_data,select = -Code)
+
+
+airports_data <- airports_data %>%
+  mutate(Origin=iata)
+airports_data<-airports_data %>% select(Origin, airport)
+
+```
+
+4. Since we have the Arrival delay and Departure delay in minutes, to continue with our EDA as well as modelling, we need a column that defines if the flight was delayed or not.
+  * According to the rules and regulation, a flight is considered delayed if the delay time is greater than 15 minutes. Taking that into consideration, we can define the "arr_delay_15" and "dep_delay_15" columns.
+
+```{r,delay}
+flight_data <- flight_data %>%
+  mutate(arr_delay_15 = if_else((ArrDelay > 15) , 1, 0))
+
+
+flight_data <- flight_data %>%
+  mutate(dep_delay_15 = if_else((DepDelay > 15) , 1, 0))
+
+```
+
+
+## Answers to the interested questions.
+
+1. Which flight carrier is most affected by delays and cancellations?
+
+> To answer this question, we need to group the data by "UniqueCarrier" and display the percentage of flights gettig delayed out of all the flights operated by a carrier.
+
+```{r,delaycarrier}
+delay_carrier <- flight_data %>%
+  group_by(UniqueCarrier) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> Now that we have the answers, to better the results, I merged the new dataset with the carriers dataset to get full name of the carriers.
+
+```{r,delaycarrier1}
+delay_carrier <- merge(delay_carrier,carriers_data,by="UniqueCarrier")
+
+p<-ggplot(data=delay_carrier, aes(x=Description, y=percentage)) +
+  geom_bar(stat="identity")
+
+p + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> As we can see the top 3 carriers whose flights were the most delayed are:
+  * Atlantic southeast Airlines
+  * JetBlue Airways
+  * Alaska Airlines
+
+
+> We have the delays data per carrier in the years 2005-2008. Lets check the cancellations data following the same steps.
+
+```{r,cancelcarrier}
+cancel_carrier <- flight_data %>%
+  group_by(UniqueCarrier) %>%
+  summarise(total_cancel=sum(Cancelled),
+            total_flights=n())%>%
+  mutate(percentage=(total_cancel*100)/total_flights)
+```
+
+> Again adding the names of the carriers.
+
+```{r,cancelcarrier1}
+cancel_carrier <- merge(cancel_carrier,carriers_data,by="UniqueCarrier")
+
+p1<-ggplot(data=cancel_carrier, aes(x=Description, y=percentage)) +
+  geom_bar(stat="identity")
+
+p1 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> From this we can say that the top 3 airlines which got cancelled the most in the years 2005-2008 are:
+  * Mesa Airlines Inc.
+  * American Eagle Airlines Inc.
+  * Pinnacle Airlines Inc.
+  
+  
+2. Which airports suffer the most delays and cancellations?
+
+> To answer this question, we need to group the data by "Origin" and display the percentage of flights gettig delayed out of all the flights departing from a certain airport.
+
+```{r,delayairport}
+delay_airport <- flight_data %>%
+  group_by(Origin) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> Now that we have the answers, to better the results, I merged the new dataset with the airports dataset to get full name of the airports. But since we have too many airports, we will look only at the top 20 airports with the most delays
+
+```{r,delayairport1}
+delay_airport <- merge(delay_airport,airports_data,by="Origin")
+delay_airport = delay_airport[order(-delay_airport$percentage),]
+
+p2<-top_n(delay_airport,n=20,percentage) %>% 
+  ggplot(., aes(x=airport, y=percentage)) +
+  geom_bar(stat="identity")
+
+p2 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+head(delay_airport)
+```
+
+> We can see that there are 3 aiports with 100% flights delayed. The reason is that those airports had only 1 to 10 flights in all 4 years. This skews our understanding of the data. Hence, it is probably the best to remove te top 5 rows of this data to understand the results better 
+
+```{r,delayairport2}
+N <- 5
+delay_airport <- tail(delay_airport, -N)
+
+p3<-top_n(delay_airport,n=20,percentage) %>% 
+  ggplot(., aes(x=airport, y=percentage)) +
+  geom_bar(stat="identity")
+
+p3 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+head(delay_airport)
+```
+
+>As we can see the top 3 airpots whose flights were the most delayed are:
+  * Gillette-Campbell County
+  * Nanfucket Memorial
+  * Moore County
+
+
+> We have the delays data per aiport in the years 2005-2008. Lets check the cancellations data following the same steps.
+
+```{r,cancelaiport}
+cancel_airport <- flight_data %>%
+  group_by(Origin) %>%
+  summarise(total_cancel=sum(Cancelled, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_cancel*100)/total_flights)
+```
+
+> Again adding the names of the aiports
+
+```{r,cancelairport1}
+cancel_airport <- merge(cancel_airport,airports_data,by="Origin")
+cancel_airport = cancel_airport[order(-cancel_airport$percentage),]
+
+
+p4<-top_n(cancel_airport,n=20,percentage) %>% 
+  ggplot(., aes(x=airport, y=percentage)) +
+  geom_bar(stat="identity")
+
+p4 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> Again, we face the same issue where the airport Provo Muni just had 1 flight in all 4 years and it got cancelled. So we need to get rid of that from our EDA.
+
+```{r,cancelairport2}
+N <- 1
+cancel_airport <- tail(cancel_airport, -N)
+
+p5<-top_n(cancel_airport,n=20,percentage) %>% 
+  ggplot(., aes(x=airport, y=percentage)) +
+  geom_bar(stat="identity")
+
+p5 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> From this we can say that the top 3 aiports which got most cancelled flights in the years 2005-2008 are:
+  * Telluride Regional
+  * Waterloo Municipal
+  * Nanfucket Memorial.
+  
+  
+3. Which airline is the most delayed and cancelled at a certain airport?  
+
+> To answer this question, we need to group the data by "Origin" as well as "UniqueCarrier" and display the percentage of flights gettig delayed out of all the flights departing from a certain airport for a certain airline.
+  
+```{r,delayaircar}
+delay_airport_carrier<- flight_data %>%
+  group_by(Origin,UniqueCarrier) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> Now, this time we need to add both the Airports name as well as the Airlines names. Hence merging that data and plotting the values.
+
+```{r,delayaircar1}
+delay_airport_carrier <- merge(delay_airport_carrier,carriers_data,by="UniqueCarrier")
+delay_airport_carrier <- merge(delay_airport_carrier,airports_data,by="Origin")
+delay_airport_carrier = delay_airport_carrier[order(-delay_airport_carrier$percentage),]
+
+p6<-top_n(delay_airport_carrier,n=20,percentage) %>% 
+  ggplot(., aes(x=airport,Description, y=percentage,fill=Description)) +
+  geom_bar(stat="identity",width=0.4, position = position_dodge(width=0.5))
+
+p6 + coord_flip()
+head(delay_airport_carrier)
+```
+
+> As you can see, there are multiple data points where the delays are 100%, but that is because we have only 1 -10 flights coming in those airports of a certain airline throughtout the 4 years. Hence, to get a better EDA we should ignore them
+
+```{r,delayaircar2}
+delay_airport_carrier <- delay_airport_carrier %>%
+  filter(percentage != 100)
+
+p7<-top_n(delay_airport_carrier,n=20,percentage) %>% 
+  ggplot(., aes(x=airport,Description, y=percentage,fill=Description)) +
+  geom_bar(stat="identity",width=0.6, position = position_dodge(width=0.8))
+
+p7 + coord_flip()
+```
+
+> This plot shows us which are the top 20 most delayed airlines at a certain airport. This gives us a view of which airlines not to take while travelling from a certain airport.
+
+> Now, lets look at the cancelled flights data at certain airports
+
+```{r,cancelaircar}
+cancel_airport_carrier<- flight_data %>%
+  group_by(Origin,UniqueCarrier) %>%
+  summarise(total_cancel=sum(Cancelled, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_cancel*100)/total_flights)
+```
+
+> Again adding airport as well as airline names for better understanding.
+
+```{r,cancelaircar1}
+cancel_airport_carrier <- merge(cancel_airport_carrier,carriers_data,by="UniqueCarrier")
+cancel_airport_carrier <- merge(cancel_airport_carrier,airports_data,by="Origin")
+cancel_airport_carrier = cancel_airport_carrier[order(-cancel_airport_carrier$percentage),]
+
+p8<-top_n(cancel_airport_carrier,n=20,percentage) %>% 
+  ggplot(., aes(x=airport,Description, y=percentage,fill=Description)) +
+  geom_bar(stat="identity",width=0.4, position = position_dodge(width=0.5))
+
+p8 + coord_flip()
+
+head(cancel_airport_carrier)
+```
+
+> We face again the issue of having very few flights from a certain airport of a certain airline and all of them getting cancelled. Hence, again we will ignore them.
+
+```{r,cancelaircar2}
+
+cancel_airport_carrier <- cancel_airport_carrier %>%
+  filter(percentage != 100)
+
+p9<-top_n(cancel_airport_carrier,n=20,percentage) %>% 
+  ggplot(., aes(x=airport,Description, y=percentage,fill=Description)) +
+  geom_bar(stat="identity",width=0.4, position = position_dodge(width=0.5))
+
+p9 + coord_flip()
+```
+
+> This plot gives us an idea of which airlines not to take if travelling from a certain airport because they keep getting cancelled.
+
+4. Does distance affect flight delays and cancellations?
+
+> To check if the distance of the flight affects the delays and cancellations, we first need to create buckets of distance since we have a lot of data.
+
+```{r,distancedelay}
+max(flight_data$Distance)
+flight_data$Distance_group <- cut(flight_data$Distance, 
+                               breaks=c(0,500,1000,1500,2000,2500,3000,3500,4000,4500,5000),
+                            labels=c("<500","500-1000","1000-1500","1500-2000","2000-2500","2500-3000","3000-3500","3500-4000","4000-4500","4500-5000"))
+```
+
+> Our max distance is 4962, hence we divided the distance data into buckets of 500 each from 0 to 5000. Once we have this data, we can group the data by these buckets and check the number of delays happening according to distance.
+
+```{r,distancedelay1}
+distance_delay <- flight_data %>%
+  group_by(Distance_group) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> On plotting this data,
+
+```{r,distancedelay2}
+p10 <- ggplot(data=distance_delay, aes(x=Distance_group, y=percentage)) +
+  geom_bar(stat="identity")
+
+p10 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+>We can see that distane doesn't seem to play an important role in defining the delays of the flights. But what about cancellations?
+
+```{r,distancecancel}
+distance_cancel <- flight_data %>%
+  group_by(Distance_group) %>%
+  summarise(total_cancel=sum(Cancelled),
+            total_flights=n())%>%
+  mutate(percentage=(total_cancel*100)/total_flights)
+```
+
+> On plotting this data,
+
+```{r,distancecancel1}
+p8 <- ggplot(data=distance_cancel, aes(x=Distance_group, y=percentage)) +
+  geom_bar(stat="identity")
+
+p8 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> We can see a trend here, i.e., Smaller the distance, more chances of a flight getting cancelled.
+
+5. Which are the top 10 most travelled routes and what is the most desired time to fly those routes.
+
+> To answer this question, we will need to bin the "DepTime" into buckets of 1 hour to make it easier since we have a lot of data and also create a new column which displays the entire route of flights.
+
+```{r,mosttravelled}
+flight_data <- flight_data %>%
+  unite("routes",Origin:Dest,sep="-",remove=FALSE)
+
+flight_data$time_group <- cut(flight_data$DepTime,
+                            breaks=c(0,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200,2300,2400),
+                            labels=c("0:00-01:00","01:00-02:00","02:00-03:00","03:00-04:00","04:00-05:00","05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"))
+```
+
+> Now, we can pull all the routes data and how many flights are there on a certain route.
+
+```{r,mosttravelled1}
+most_travelled <- flight_data %>%
+  group_by(routes) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> We can pull the top 10 most travelled routes
+
+```{r,mosttravelled2}
+most_travelled = most_travelled[order(-most_travelled$total_flights),]
+most_travelled <- top_n(most_travelled,n=10,total_flights)
+most_travelled
+```
+
+> Since we have this, we can now just pull all the flights of these 10 routes and calculate the delay on these routes. By grouping this data by routes, Day of Week and time group, we will be able to say which Day of week and at what time should we take a flight on a certain famous route to make sure we are not a victim of delays.
+
+```{r,besttime}
+best_time_most_travelled <- flight_data %>%
+  filter(routes %in% most_travelled$routes) %>%
+  filter(Cancelled != 1) %>%
+  group_by(routes,DayOfWeek,time_group) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+
+best_time_most_travelled = best_time_most_travelled[order(best_time_most_travelled$percentage),]
+```
+
+> Lets pull the best and worst time on a certain Day of a week for all these routes
+
+```{r,besttime1}
+best_time_SAN_LAX <- best_time_most_travelled %>%
+  filter(routes=="SAN-LAX")
+
+best_time_SAN_LAX = best_time_SAN_LAX[order(best_time_SAN_LAX$percentage),]
+head(best_time_SAN_LAX,n=1)
+tail(best_time_SAN_LAX,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_LAX_SAN <- best_time_most_travelled %>%
+  filter(routes=="LAX-SAN")
+
+best_time_LAX_SAN = best_time_LAX_SAN[order(best_time_SAN_LAX$percentage),]
+head(best_time_LAX_SAN,n=1)
+tail(best_time_LAX_SAN,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_LAX_LAS <- best_time_most_travelled %>%
+  filter(routes=="LAX-LAS")
+
+best_time_LAX_LAS = best_time_LAX_LAS[order(best_time_SAN_LAX$percentage),]
+head(best_time_LAX_LAS,n=1)
+tail(best_time_LAX_LAS,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_LAS_LAX <- best_time_most_travelled %>%
+  filter(routes=="LAS-LAX")
+
+best_time_LAS_LAX = best_time_LAS_LAX[order(best_time_SAN_LAX$percentage),]
+head(best_time_LAS_LAX,n=1)
+tail(best_time_LAS_LAX,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_BOS_LGA <- best_time_most_travelled %>%
+  filter(routes=="BOS-LGA")
+
+best_time_BOS_LGA = best_time_BOS_LGA[order(best_time_SAN_LAX$percentage),]
+head(best_time_BOS_LGA,n=1)
+tail(best_time_BOS_LGA,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_LGA_BOS <- best_time_most_travelled %>%
+  filter(routes=="LGA-BOS")
+
+best_time_LGA_BOS = best_time_LGA_BOS[order(best_time_SAN_LAX$percentage),]
+head(best_time_LGA_BOS,n=1)
+tail(best_time_LGA_BOS,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_OGG_HNL <- best_time_most_travelled %>%
+  filter(routes=="OGG-HNL")
+
+best_time_OGG_HNL = best_time_OGG_HNL[order(best_time_SAN_LAX$percentage),]
+head(best_time_OGG_HNL,n=1)
+tail(best_time_OGG_HNL,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_HNL_OGG <- best_time_most_travelled %>%
+  filter(routes=="HNL-OGG")
+
+best_time_HNL_OGG = best_time_HNL_OGG[order(best_time_SAN_LAX$percentage),]
+head(best_time_HNL_OGG,n=1)
+tail(best_time_HNL_OGG,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_DCA_LGA <- best_time_most_travelled %>%
+  filter(routes=="DCA-LGA")
+
+best_time_DCA_LGA = best_time_DCA_LGA[order(best_time_SAN_LAX$percentage),]
+head(best_time_DCA_LGA,n=1)
+tail(best_time_DCA_LGA,n=1)
+#--------------------------------------------------------------------------------------------#
+best_time_LGA_DCA <- best_time_most_travelled %>%
+  filter(routes=="LGA-DCA")
+
+best_time_LGA_DCA = best_time_LGA_DCA[order(best_time_SAN_LAX$percentage),]
+head(best_time_LGA_DCA,n=1)
+tail(best_time_LGA_DCA,n=1)
+```
+
+6. Considering 2008 had a major recession, did that affect the flight operations compared to other years?
+
+> Since we onty have minimal data from 2008, that is of only the first four months, we will only compare the number of flights from all the 4 years which flew in the first 4 months.
+
+```{r,compare}
+flight_data_compare <- flight_data %>%
+  filter(Month=="1" | Month=="2" | Month=="3" | Month=="4")
+
+compare <- flight_data_compare %>%
+  group_by(Year) %>%
+  summarise(total_delay=sum(arr_delay_15, na.rm=TRUE),
+            total_flights=n())%>%
+  mutate(percentage=(total_delay*100)/total_flights)
+```
+
+> Now, we can plot this data. 
+
+```{r,compare1}
+p10 <- ggplot(data=compare, aes(x=Year, y=percentage)) +
+  geom_bar(stat="identity")
+
+p10 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+
+```
+
+> We can see that there is a definite amount of rise in the flights being delayed in 2007 and 2008. We cannot say for sure if this was because of the recession period of 2008 or anyother factor. We need more data to prove that theory.
+
+> But what about cancellations?
+
+```{r,compare2}
+comparecancel <- flight_data_compare %>%
+  group_by(Year) %>%
+  summarise(total_cancel=sum(Cancelled),
+            total_flights=n())%>%
+  mutate(percentage=(total_cancel*100)/total_flights)
+```
+
+```{r,compare3}
+p11 <- ggplot(data=comparecancel, aes(x=Year, y=percentage)) +
+  geom_bar(stat="identity")
+
+p11 + theme(axis.text.x = element_text(angle = 90),legend.position = "none")
+```
+
+> We can see a clear rize in the number of flights cancelled during 2007 and 2008. Again this doesn't prove the recession theroy but gives a vague idea about it.
+
+# Modelling
+
+1. Select algorithm for machine learning
+  * Prediction -> Supervised Machine Learning
+  * Regression vs. Classification --> Classification (i.e. predict if a flight would arrive 15+ minutes after the scheduled arrival time)
+  * Eliminate "ensemble" algorithms which have multiple child algorithms, and are aimed to boost performance amount of data
+  * There are three candidate algorithms:
+     + <b>Naives Bayes</b>: based on likelihood and probability, every feature(column) has the same weight, requires smaller amount of data
+     + <b>Logistic Regression</b>: gives binary result, relationships between features are weighted
+     + <b>Decision Tree</b>: binary tree, each node contains decision, requires enough data to determine nodes and splits, takes more time to run
+  * I chose <b>Logistic Regression</b> for this model because:
+     + It is simple and easy to understand
+     + It is faster than some of the other algorithms 
+     + It is stable relative to data changes
+
+
+2. Cleaning the data: for arrival delay column `arr_delay_15` and departure delay column `dep_delay_15`, remove rows with `NA` or ""
+```{r,cleaning}
+final_data <- flight_data[!is.na(flight_data$arr_delay_15) & flight_data$arr_delay_15!="" & !is.na(flight_data$dep_delay_15) & flight_data$dep_delay_15!="",]
+```
+
+3. Convert all required columns from strings to factors or to integers (so that they can work with model)
+```{r,convert}
+final_data$Year <- as.factor(final_data$Year)
+final_data$Month <- factor(final_data$Month,1:12,month.abb) # convert to factor and set abbreviation of months
+final_data$DayofMonth <- as.factor(final_data$DayofMonth)
+final_data$DayOfWeek <- factor(final_data$DayOfWeek,        # convert to factor and set labels
+                               labels= c("Mon","Tues","Wed","Thurs","Fri","Sat","Sun"))
+final_data$UniqueCarrier <- as.factor(final_data$UniqueCarrier)
+final_data$Origin <- as.factor(final_data$Origin)
+final_data$Dest <- as.factor(final_data$Dest)
+final_data$Distance <- as.integer(final_data$Distance)
+final_data$arr_delay_15 <- as.factor(final_data$arr_delay_15)
+final_data$dep_delay_15 <- as.factor(final_data$dep_delay_15)
+final_data$time_group <- as.factor(final_data$time_group)
+final_data$DepTime <- as.integer(final_data$DepTime)
+```
+
+ 
+4. Split the data into two sets: `training` and `testing`, and select columns
+* Split the data into two sets: 70% for training set, 30% for testing set
+* Select minimum features(columns) based on hypothesis of what would impact the result:
+   + Origin and Destination
+   + Month
+   + Day of Month
+   + Day of the Week
+   + Unique Carrier
+   + Departure Time
+   + Arrival Delay 15 (required as part of supervised machine learning)
+
+5. Use the `caret` package to split the data 
+Caret = <u>C</u>lassification <u>A</u>nd <u>RE</u>gression <u>T</u>raining
+
+* Split the data
+* Pre-process the data
+* Feature selection
+* Model tuning
+
+```{r,split}
+library(caret)
+set.seed(13)
+feature <- c("arr_delay_15","Month","DayofMonth","DayOfWeek","UniqueCarrier","Distance","DepTime","Origin","Dest")
+final_sorted <- final_data[,feature]
+```
+
+Since the dataset is very huge. We will randomply sample 100000 rows of data from the dataset due to limitations of R. Then we will split the data into two sets: 70% training data, 30% testing data. Make sure that they are evenly distributed based on the value `arr_delay_15` (i.e. the proportion of delays should be the same among the two sets)
+
+Create the training set:
+```{r,trainingset}
+final_sorted <- final_sorted[sample(nrow(final_sorted), 100000), ]
+training_index <- createDataPartition(final_sorted$arr_delay_15,p=0.7,list=FALSE)
+```
+
+Take a peek at this list, which will help create the dataframe for training data
+
+```{r,trainingset1}
+head(training_index,10)
+```
+
+6. Create the 70% training and 30% testing sets
+
+```{r,split1}
+training_data <- final_sorted[training_index,]
+testing_data <- final_sorted[-training_index,]
+```
+
+7. Create the training model
+The `.` sign next to `~` means that all columns except the one before `~` is used to train the model
+
+```{r,logmodel}
+log_reg_model <- glm(arr_delay_15 ~ .,data=training_data,family = "binomial")
+#summary(log_reg_model)
+```
+
+8.  Test the logistic regression model's accuracy, using test data
+
+```{r,predict}
+testing_data <- subset(testing_data, Origin != "GST")
+testing_data <- subset(testing_data, Origin != "SOP")
+testing_data <- subset(testing_data, Dest != "ADK")
+testing_data <- subset(testing_data, Dest != "RKS")
+testing_data$predicted <- predict(log_reg_model, testing_data, type="response")
+testing_data$predicted <- ifelse(testing_data$predicted > 0.5, 1, 0)
+
+confusion_matrix_reg <- confusionMatrix(as.factor(testing_data$predicted),as.factor(testing_data$arr_delay_15))
+confusion_matrix_reg
+```
+
+  
+9. Developing another logistic regression model with lesser features:
+
+```{r,logmodel1}
+feature <- c("arr_delay_15","DayOfWeek","Distance","Origin","Dest")
+new_sorted <- final_data[,feature]
+
+new_sorted <- new_sorted[sample(nrow(new_sorted), 100000), ]
+training_index <- createDataPartition(new_sorted$arr_delay_15,p=0.7,list=FALSE)
+training_data1 <- new_sorted[training_index,]
+testing_data1 <- new_sorted[-training_index,]
+log_reg_model_small <- glm(arr_delay_15 ~ .,data=training_data1,family = "binomial")
+#summary(log_reg_model_small)
+
+testing_data1 <- subset(testing_data1, Origin != "ADK")
+testing_data1 <- subset(testing_data1, Origin != "BJI")
+testing_data1 <- subset(testing_data1, Origin != "TEX")
+testing_data1 <- subset(testing_data1, Dest != "GST")
+testing_data1 <- subset(testing_data1, Dest != "LWB")
+testing_data1 <- subset(testing_data1, Dest != "VCT")
+testing_data1 <- subset(testing_data1, Dest != "VIS")
+testing_data1$predicted <- predict(log_reg_model_small, testing_data1, type="response")
+testing_data1$predicted <- ifelse(testing_data1$predicted > 0.5, 1, 0)
+
+confusion_matrix_reg1 <- confusionMatrix(as.factor(testing_data1$predicted),as.factor(testing_data1$arr_delay_15))
+confusion_matrix_reg1
+```
+
+10. Now, we can compare both the models using ANOVA using a chisq test
+
+```{r,anova}
+anova(log_reg_model, log_reg_model_small, test="Chisq")
+```
+
+> From the results of ANOVA and the performance of the models in general, we can see that the Larger Model is performing better for us.
+
+11. Improve model performance
+Options for improving model performance:
+* Add additional columns
+  + e.g. add "DEP_DEL15"
+* Adjust training settings
+* Select a different algorithm
+  + Use emsemble algo: use Random Forest to see if different models can improve performance
+* Rethink the question - is there any other factor that may impact the model?
+  + e.g. add weather data. Where can we get weather data, and how to combine it into the model? To be continued in the next post...
+
+Conclusion:
+* Logistic regression model provides a fast and accurate prediction of flights that will not be delayed
+* The more the distance between the origin and destination, less likely that the flight will be cancelled.
+* Certain airlines should be avoided to not become a victim of delays or cancellation.
+* There are other factors playing a very important role in deciding the flight delays and cancellations. Factors like, weather, wind speed, Security reasons, Runway condition, Airport traffic, etc. Hence the models can be improved even more to define if our flights will be victim of delay or cancellations or not.
